@@ -24,7 +24,7 @@ public class BurpExtender implements IBurpExtender {
         new Thread(collabMonitor).start();
         callbacks.registerExtensionStateListener(collabMonitor);
 
-        callbacks.registerProxyListener(new Injector(collab));
+        callbacks.registerScannerCheck(new Injector(collab));
 
         Utilities.out("Loaded " + name + " v" + version);
     }
@@ -132,12 +132,10 @@ class Monitor implements Runnable, IExtensionStateListener {
 
 class MetaRequest {
     private IHttpRequestResponse request;
-    private int burpId;
     private long timestamp;
 
-    MetaRequest(IInterceptedProxyMessage proxyMessage) {
-        request = proxyMessage.getMessageInfo();
-        burpId = proxyMessage.getMessageReference();
+    MetaRequest(IHttpRequestResponse baseRequestResponse) {
+        request = baseRequestResponse;
         timestamp = System.currentTimeMillis();
     }
 
@@ -147,10 +145,6 @@ class MetaRequest {
 
     public IHttpRequestResponse getRequest() {
         return request;
-    }
-
-    public int getBurpId() {
-        return burpId;
     }
 
     public long getTimestamp() {
@@ -164,7 +158,6 @@ class Correlator {
     private HashMap<String, Integer> idToRequestID;
     private HashMap<String, String> idToType;
     private HashMap<Integer, MetaRequest> requests;
-    private HashMap<Integer, Integer> burpIdToRequestID;
     private HashSet<String> client_ips;
     private int count = 0;
 
@@ -172,7 +165,6 @@ class Correlator {
         idToRequestID = new HashMap<>();
         requests = new HashMap<>();
         idToType = new HashMap<>();
-        burpIdToRequestID = new HashMap<>();
         collab = Utilities.callbacks.createBurpCollaboratorClientContext();
         client_ips = new HashSet<>();
 
@@ -200,7 +192,6 @@ class Correlator {
     Integer addRequest(MetaRequest req) {
         Integer requestCode = count++;
         requests.put(requestCode, req);
-        burpIdToRequestID.put(req.getBurpId(), requestCode);
         return requestCode;
     }
 
@@ -224,18 +215,12 @@ class Correlator {
         return requests.get(requestId);
     }
 
-    void updateResponse(int burpId, IHttpRequestResponse response) {
-        if (burpIdToRequestID.containsKey(burpId)) {
-            requests.get(burpIdToRequestID.get(burpId)).overwriteRequest(response);
-        }
-    }
-
     String getType(String collabid) {
         return idToType.get(collabid);
     }
 }
 
-class Injector implements IProxyListener {
+class Injector implements IScannerCheck {
 
     private Correlator collab;
     HashSet<String[]> injectionPoints = new HashSet<>();
@@ -287,34 +272,34 @@ class Injector implements IProxyListener {
     }
 
     @Override
-    public void processProxyMessage(boolean messageIsRequest, IInterceptedProxyMessage proxyMessage) {
-        if (!messageIsRequest) {
-            if (BurpExtender.SAVE_RESPONSES) {
-                collab.updateResponse(proxyMessage.getMessageReference(), proxyMessage.getMessageInfo());
-            }
-            return;
-        }
+    public List<IScanIssue> doPassiveScan(IHttpRequestResponse baseRequestResponse){
 
-        IHttpRequestResponse messageInfo = proxyMessage.getMessageInfo();
-	
-	// only tamper with requests that are in scope
-	IRequestInfo reqinfo = Utilities.helpers.analyzeRequest(messageInfo.getHttpService(), messageInfo.getRequest());
-	
-	if (!Utilities.callbacks.isInScope(reqinfo.getUrl())) {
-		return;
-	}
+        IHttpRequestResponse messageInfo = baseRequestResponse;
 
         // don't tamper with requests already heading to the collaborator
         if (messageInfo.getHttpService().getHost().endsWith(collab.getLocation())) {
-            return;
+            return null;
         }
 
-        MetaRequest req = new MetaRequest(proxyMessage);
+        MetaRequest req = new MetaRequest(baseRequestResponse);
         Integer requestCode = collab.addRequest(req);
+        Utilities.callbacks.makeHttpRequest(messageInfo.getHttpService(), injectPayloads(messageInfo.getRequest(), requestCode));
 
-        messageInfo.setRequest(injectPayloads(messageInfo.getRequest(), requestCode));
+        return null;
+    }
 
+    @Override
+    public List<IScanIssue> doActiveScan(
+            IHttpRequestResponse baseRequestResponse, IScannerInsertionPoint insertionPoint) {
+        return null;
+    }
 
+    @Override
+    public int consolidateDuplicateIssues(IScanIssue existingIssue, IScanIssue newIssue) {
+        if (existingIssue.getIssueDetail().equals(newIssue.getIssueDetail())){
+            return -1;
+        }
+        return 0;
     }
 
 }
