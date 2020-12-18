@@ -272,7 +272,8 @@ class Injector implements IScannerCheck {
     }
 
     @Override
-    public List<IScanIssue> doPassiveScan(IHttpRequestResponse baseRequestResponse){
+    public List<IScanIssue> doActiveScan(
+            IHttpRequestResponse baseRequestResponse, IScannerInsertionPoint insertionPoint) {
 
         IHttpRequestResponse messageInfo = baseRequestResponse;
 
@@ -289,8 +290,7 @@ class Injector implements IScannerCheck {
     }
 
     @Override
-    public List<IScanIssue> doActiveScan(
-            IHttpRequestResponse baseRequestResponse, IScannerInsertionPoint insertionPoint) {
+    public List<IScanIssue> doPassiveScan(IHttpRequestResponse baseRequestResponse) {
         return null;
     }
 
